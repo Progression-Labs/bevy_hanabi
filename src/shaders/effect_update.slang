@@ -1,6 +1,14 @@
 // An effect's update kernel: a thread per slot. A live particle ages, runs the update modifiers
 // and, still alive, the render modifiers, which shape its TLAS instance row (its axes scaled by
-// its size, at its position) and colour its tint. A slot with nothing in it traces nothing.
+// its size, at its position) and colour its tint. A slot with nothing in it parks its row at the
+// emitter (aurora's instance_rows.slang `parked`): a point that traces nothing but stays in the
+// TLAS build, so particles dying and being born leave the build's instances as they were and
+// the TLAS refits instead of rebuilding every frame (zero #1028).
+
+// Where a dead particle's row waits: the emitter, in the world.
+Transform parked_row() {
+    return parked(float3(spawner.transform[0].w, spawner.transform[1].w, spawner.transform[2].w));
+}
 
 {{UPDATE_EXTRA}}
 
@@ -16,7 +24,7 @@ void update(uint3 gid: SV_DispatchThreadID) {
     }
     let state = push.alive[slot];
     if (state == 0u) {
-        writeRow(push.rows, slot, noTransform(), noTransform());
+        writeRow(push.rows, slot, parked_row(), parked_row());
         return;
     }
 
@@ -32,7 +40,7 @@ void update(uint3 gid: SV_DispatchThreadID) {
         InterlockedAdd(push.state.free_count, 1, at);
         push.free_slots[at] = slot;
         InterlockedAdd(push.state.alive_count, 0xFFFFFFFFu);
-        writeRow(push.rows, slot, noTransform(), noTransform());
+        writeRow(push.rows, slot, parked_row(), parked_row());
         return;
     }
 {{WRITEBACK_CODE}}
