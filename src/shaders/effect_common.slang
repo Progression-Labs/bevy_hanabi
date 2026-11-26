@@ -54,7 +54,8 @@ struct EffectState {
 struct EffectPush {
     Particle* particles;
     uint* free_slots;
-    // Per slot: 0 free, 1 alive, 2 born this frame (no motion yet).
+    // Per slot: 0 never held a particle, 1 alive, 2 born this frame (no motion yet), 3 free
+    // after holding one (its row parked: effect_update.slang).
     uint* alive;
     // Per slot, last frame's instance transform rows, for motion vectors.
     Transform* last;

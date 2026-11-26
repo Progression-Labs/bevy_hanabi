@@ -1,13 +1,22 @@
 // An effect's update kernel: a thread per slot. A live particle ages, runs the update modifiers
 // and, still alive, the render modifiers, which shape its TLAS instance row (its axes scaled by
-// its size, at its position) and colour its tint. A slot with nothing in it parks its row at the
-// emitter (aurora's instance_rows.slang `parked`): a point that traces nothing but stays in the
-// TLAS build, so particles dying and being born leave the build's instances as they were and
-// the TLAS refits instead of rebuilding every frame (zero #1028).
+// its size, at its position) and colour its tint.
+//
+// A slot that has held a particle parks its row once the particle dies: a sphere a millionth of
+// the particle mesh's size at the emitter, which nothing sees, but which stays in aurora's TLAS
+// build (instances.slang `slotLive` leaves out only rows with no axes). A Vulkan TLAS update may
+// not turn an instance on or off, so with every dead particle's row emptied each death and birth
+// changed the build's instances and aurora rebuilt the TLAS every frame an effect ran (zero
+// #1028). The slots are a stack (each death pushes its slot back on top, each birth takes the
+// top), so the slots ever used are the most ever alive at once: a slot never used keeps an empty
+// row, and an effect costs the build its peak of particles, not its capacity.
 
-// Where a dead particle's row waits: the emitter, in the world.
+// Where a dead particle's row waits: the emitter, in the world, with axes of a millionth (not
+// zero: a singular transform is no instance's).
 Transform parked_row() {
-    return parked(float3(spawner.transform[0].w, spawner.transform[1].w, spawner.transform[2].w));
+    let s = 1.0e-6;
+    return { float4(s, 0.0, 0.0, spawner.transform[0].w), float4(0.0, s, 0.0, spawner.transform[1].w),
+             float4(0.0, 0.0, s, spawner.transform[2].w) };
 }
 
 {{UPDATE_EXTRA}}
@@ -24,6 +33,10 @@ void update(uint3 gid: SV_DispatchThreadID) {
     }
     let state = push.alive[slot];
     if (state == 0u) {
+        writeRow(push.rows, slot, noTransform(), noTransform());
+        return;
+    }
+    if (state == 3u) {
         writeRow(push.rows, slot, parked_row(), parked_row());
         return;
     }
@@ -35,7 +48,7 @@ void update(uint3 gid: SV_DispatchThreadID) {
     {{UPDATE_CODE}}
 
     if (!is_alive) {
-        push.alive[slot] = 0u;
+        push.alive[slot] = 3u;
         int at;
         InterlockedAdd(push.state.free_count, 1, at);
         push.free_slots[at] = slot;
